@@ -25,7 +25,7 @@ def preprocess_data():
     
     df_train = fillna_median(df_train, ['Location_Easting_OSGR', 'Location_Northing_OSGR'])
     df_test = fillna_median(df_test, ['Location_Easting_OSGR', 'Location_Northing_OSGR'])
-    
+
     categorical_attributes = [x for x, y in df_train.dtypes if y == 'string']
     if categorical_attributes:
         index_output_cols = [x + "_SI" for x in categorical_attributes]
