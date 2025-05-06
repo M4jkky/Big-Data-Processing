@@ -8,45 +8,24 @@ from pyspark.sql.functions import col, log2, sum, count, when, median
 from integration.integration import integration
 from pyspark.sql import SparkSession
 
-# Initialize Spark session
 spark = SparkSession.builder.appName("preprocessing").getOrCreate()
 spark.sparkContext.setLogLevel("ERROR")
 
 def fillna_median(df, include=None):
-    """
-    Fill missing values in the specified columns with their median values
-    
-    Args:
-        df: DataFrame to process
-        include: List of column names to fill with median values
-        
-    Returns:
-        DataFrame with missing values filled
-    """
     if include is None:
         include = set()
     medians = df.agg(*(median(x).alias(x) for x in df.columns if x in include))
     return df.fillna(medians.first().asDict())
 
 def preprocess_data():
-    """
-    Main preprocessing function that processes the data and returns training and test datasets
-    
-    Returns:
-        Tuple of (df_train_model, df_test_model) containing the preprocessed dataframes
-    """
-    # Load and integrate data
     df_train, df_test = integration()
     
-    # Remove unnecessary columns
     df_train = df_train.drop("Accident_Index", "Date", "Time", "Longitude", "Latitude", "LSOA_of_Accident_Location")
     df_test = df_test.drop("Accident_Index", "Date", "Time", "Longitude", "Latitude", "LSOA_of_Accident_Location")
     
-    # Fill missing values with median
     df_train = fillna_median(df_train, ['Location_Easting_OSGR', 'Location_Northing_OSGR'])
     df_test = fillna_median(df_test, ['Location_Easting_OSGR', 'Location_Northing_OSGR'])
-    
-    # Process categorical attributes with one-hot encoding
+
     categorical_attributes = [x for x, y in df_train.dtypes if y == 'string']
     if categorical_attributes:
         index_output_cols = [x + "_SI" for x in categorical_attributes]
@@ -60,13 +39,11 @@ def preprocess_data():
         df_train = ohe.fit(df_train).transform(df_train)
         df_test = ohe.fit(df_test).transform(df_test)
         
-        # Remove original categorical columns and index columns
         df_train = df_train.drop(*index_output_cols)
         df_train = df_train.drop(*categorical_attributes)
         df_test = df_test.drop(*index_output_cols)
         df_test = df_test.drop(*categorical_attributes)
     
-    # Bin numerical attributes to categories
     driver_age_splits = [-float("inf"), 18, 25, 40, 60, float("inf")]
     driver_age_bucketizer = Bucketizer(splits=driver_age_splits, inputCol="Age_of_Driver", 
                                       outputCol="Age_of_Driver_Cat", handleInvalid="skip")
@@ -84,7 +61,6 @@ def preprocess_data():
     vehicle_type_bucketizer = Bucketizer(splits=vehicle_type_splits, inputCol="Vehicle_Type", 
                                         outputCol="Vehicle_Type_Cat", handleInvalid="keep")
     
-    # Apply the bucketizers if columns exist
     for col_name, bucketizer in [
         ("Age_of_Driver", driver_age_bucketizer),
         ("Age_of_Vehicle", vehicle_age_bucketizer),
@@ -95,7 +71,6 @@ def preprocess_data():
             df_train = bucketizer.transform(df_train)
             df_test = bucketizer.transform(df_test)
             
-    # Remove original numerical columns that were binned
     columns_to_drop = ["Age_of_Driver", "Age_of_Vehicle", "Engine_Capacity_(CC)", "Vehicle_Type"]
     for col_name in columns_to_drop:
         if col_name in df_train.columns:
@@ -103,7 +78,6 @@ def preprocess_data():
         if col_name in df_test.columns:
             df_test = df_test.drop(col_name)
             
-    # Apply StandardScaler to numerical features
     numerical_cols_to_scale = [col_name for col_name, dtype in df_train.dtypes 
                               if dtype in ['int', 'double'] 
                               and col_name not in ['Age_of_Driver_Cat', 'Age_of_Vehicle_Cat', 
@@ -129,7 +103,6 @@ def preprocess_data():
         df_train = scaler_model.transform(df_train)
         df_test = scaler_model.transform(df_test)
     
-    # Remove low information gain columns
     low_ig_cols = [
         "Day_of_Week", "1st_Road_Class", "Road_Type", "Pedestrian_Crossing-Human_Control",
         "Pedestrian_Crossing-Physical_Facilities", "Light_Conditions", "Weather_Conditions",
@@ -144,14 +117,12 @@ def preprocess_data():
         "Engine_Size_Cat"
     ]
     
-    # Remove columns if they exist
     for col_name in low_ig_cols:
         if col_name in df_train.columns:
             df_train = df_train.drop(col_name)
         if col_name in df_test.columns:
             df_test = df_test.drop(col_name)
     
-    # Create final feature vector for modeling
     exclude_cols = ["Accident_Severity", "numerical_features_vec", "scaled_numerical_features", 
                     "Local_Authority_(Highway)", "Local_Authority_(Highway)_SI",
                     "Local_Authority_(Highway)_OHE"]
